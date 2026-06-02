@@ -183,7 +183,7 @@ export function postProcess(text) {
   return result;
 }
 
-export const REFINE_PROMPT = `You just received a draft written by an AI that was already edited once. It's decent but still has a slightly polished, artificial feel. Your job is to rough it up and make it sound like a real person wrote it fast.
+export const REFINE_PROMPT = `You just received a draft that feels slightly too polished and stiff. Your job is to rough it up and make it sound like a real person wrote it fast and naturally.
 
 Specifically:
 1. Pick 2-3 sentences that feel too clean and rewrite them to be messier — add a dash, a fragment, a self-correction, or a quick aside.
