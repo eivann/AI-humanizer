@@ -1,4 +1,4 @@
-import { setCors, callOpenAI, postProcess } from "../../_lib/helpers.js";
+import { setCors, callOpenAI, postProcess } from "../_lib/helpers.js";
 
 export const config = { maxDuration: 60 };
 
