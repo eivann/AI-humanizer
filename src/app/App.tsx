@@ -64,17 +64,6 @@ const calculateMetrics = (text: string) => {
   return { bypassRate: `${finalScore}%`, readability };
 };
 
-const REFINE_PROMPT = `You just received a draft written by an AI that was already edited once. It's decent but still has a slightly polished, artificial feel. Your job is to rough it up and make it sound like a real person wrote it fast.
-
-Specifically:
-1. Pick 2-3 sentences that feel too clean and rewrite them to be messier — add a dash, a fragment, a self-correction, or a quick aside.
-2. Find any sentence that starts with a capital word that sounds formal ("This system", "These tools", "Such methods") and rewrite the opener to be more casual.
-3. Find at least one place to add a rhetorical question ("Why does that matter?" / "Sound familiar?" / "And honestly, who wouldn't?").
-4. Make sure contractions are used wherever possible — no "do not", "it is", "they are" unless it's for emphasis.
-5. Don't change the meaning. Don't change more than 30% of the sentences.
-
-Output ONLY the refined text. No commentary.`;
-
 const API_BASE = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
   ? "http://localhost:3001"
   : "";
@@ -98,7 +87,6 @@ export default function App() {
   const currentOutput = mode === "Variations" && variations.length > 0 ? variations[activeVar] || "" : output;
   const outputMetrics = useMemo(() => calculateMetrics(currentOutput), [currentOutput]);
 
-  const providerCode = "openai";
   const prompt = buildSystemPrompt(fluency, tone);
 
   // ── SSE Stream Reader ──
@@ -121,65 +109,55 @@ export default function App() {
     }
   }, []);
 
-  // ── Standard Mode (Streaming) ──
+  // ── Standard Mode ──
   const handleStandard = useCallback(async () => {
     setOutput("");
-    const res = await fetch(`${API_BASE}/api/humanize/stream`, {
+    const res = await fetch(`${API_BASE}/api/humanize`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: input, prompt, provider: providerCode }),
+      body: JSON.stringify({ text: input, prompt }),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err?.error?.message || `HTTP ${res.status}`);
     }
-    let full = "";
-    await readSSE(res, (data) => {
-      if (data.error) throw new Error(data.error);
-      if (data.text) { full += data.text; setOutput(full); }
-    });
-    if (!full) throw new Error("Empty response from the humanizer engine.");
-  }, [input, prompt, providerCode, readSSE]);
+    const data = await res.json();
+    if (!data.content) throw new Error("Empty response from the humanizer engine.");
+    setOutput(data.content);
+  }, [input, prompt]);
 
-  // ── Deep Mode (Multi-pass client-side orchestration) ──
+  // ── Deep Mode (Single SSE endpoint, server-side multi-pass) ──
   const handleDeep = useCallback(async () => {
     setOutput("");
     setDeepProgress({ pass: 1, total: 3, status: "Humanizing original text..." });
 
-    // Pass 1: Humanization Prompt without post-processing (skipPostProcess: true)
-    const res1 = await fetch(`${API_BASE}/api/humanize`, {
+    const res = await fetch(`${API_BASE}/api/humanize/deep`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: input, prompt, skipPostProcess: true }),
+      body: JSON.stringify({ text: input, prompt }),
     });
-    if (!res1.ok) {
-      const err = await res1.json().catch(() => ({}));
-      throw new Error(err?.error?.message || `Pass 1 failed: HTTP ${res1.status}`);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err?.error?.message || `HTTP ${res.status}`);
     }
-    const data1 = await res1.json();
-    if (!data1.content) throw new Error("Pass 1 returned empty content.");
-    
-    // Show intermediate result (run a mock fast postProcess just for UI visualization)
-    setOutput(data1.content);
-    setDeepProgress({ pass: 2, total: 3, status: "AI deep refinement pass..." });
 
-    // Pass 2: Deep Refinement Prompt with post-processing (skipPostProcess: false)
-    const res2 = await fetch(`${API_BASE}/api/humanize`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: data1.content, prompt: REFINE_PROMPT, skipPostProcess: false }),
+    let finalText = "";
+    await readSSE(res, (data) => {
+      if (data.type === "progress") {
+        setDeepProgress({ pass: data.pass, total: data.total, status: data.status });
+      } else if (data.type === "pass_result") {
+        setOutput(data.text);
+      } else if (data.type === "done") {
+        finalText = data.text;
+        setOutput(data.text);
+      } else if (data.type === "error") {
+        throw new Error(data.message);
+      }
     });
-    if (!res2.ok) {
-      const err = await res2.json().catch(() => ({}));
-      throw new Error(err?.error?.message || `Pass 2 failed: HTTP ${res2.status}`);
-    }
-    const data2 = await res2.json();
-    if (!data2.content) throw new Error("Pass 2 returned empty content.");
 
-    setDeepProgress({ pass: 3, total: 3, status: "Statistical token transformation..." });
-    setOutput(data2.content);
     setDeepProgress(null);
-  }, [input, prompt]);
+    if (!finalText) throw new Error("Deep humanization produced no output.");
+  }, [input, prompt, readSSE]);
 
   // ── Variations Mode ──
   const handleVariations = useCallback(async () => {
@@ -188,7 +166,7 @@ export default function App() {
     const res = await fetch(`${API_BASE}/api/humanize/variations`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: input, prompt, provider: providerCode }),
+      body: JSON.stringify({ text: input, prompt }),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
@@ -197,7 +175,7 @@ export default function App() {
     const data = await res.json();
     if (!data.variations?.length) throw new Error("No variations returned.");
     setVariations(data.variations);
-  }, [input, prompt, providerCode]);
+  }, [input, prompt]);
 
   const handleHumanize = async () => {
     if (!input.trim() || isProcessing || isOverLimit) return;

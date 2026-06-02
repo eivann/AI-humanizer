@@ -108,6 +108,46 @@ const DASH_INTERJECTIONS = [
   "— worth keeping in mind —",
 ];
 
+// Must match the MAX_CHARS constant in src/app/App.tsx.
+// The Vercel API build root cannot import from src/, so this is
+// duplicated by convention — keep them in sync.
+export const MAX_CHARS = 5000;
+
+export function validateHumanizeBody(body) {
+  if (!body || typeof body !== "object") {
+    return { ok: false, status: 400, message: "Request body must be a JSON object." };
+  }
+  const { text, prompt } = body;
+  if (typeof text !== "string" || !text.trim()) {
+    return { ok: false, status: 400, message: "'text' is required and must be a non-empty string." };
+  }
+  if (typeof prompt !== "string" || !prompt.trim()) {
+    return { ok: false, status: 400, message: "'prompt' is required and must be a non-empty string." };
+  }
+  if (text.length > MAX_CHARS) {
+    return { ok: false, status: 413, message: `'text' exceeds ${MAX_CHARS} character limit.` };
+  }
+  return { ok: true };
+}
+
+export function withApiGuards(handler, { methods = ["POST"] } = {}) {
+  return async function guardedHandler(req, res) {
+    setCors(res);
+    if (req.method === "OPTIONS") return res.status(200).end();
+    if (!methods.includes(req.method)) {
+      return res.status(405).json({ error: { message: "Method not allowed" } });
+    }
+    if (!process.env.FREEMODEL_API_KEY) {
+      return res.status(500).json({ error: { message: "API key not configured." } });
+    }
+    const v = validateHumanizeBody(req.body);
+    if (!v.ok) {
+      return res.status(v.status).json({ error: { message: v.message } });
+    }
+    return handler(req, res);
+  };
+}
+
 export function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 
 export function postProcess(text) {
