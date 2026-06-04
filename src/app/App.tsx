@@ -14,41 +14,6 @@ type Length = (typeof LENGTH_OPTIONS)[number];
 
 const MAX_CHARS = 5000;
 
-const buildSystemPrompt = (fluency: Fluency, tone: Tone, length: Length) => {
-  const lengthDirectives = {
-    Default: "Maintain a similar length and level of detail as the original text.",
-    Shorten: "Make the output significantly shorter, more compact, and condensed than the original text, getting straight to the point.",
-    Extend: "Make the output longer, more detailed, and elaborate than the original text, expanding on the ideas with natural explanations, conversational tangents, or extra context.",
-    Concise: "Make the output highly concise, punchy, and direct, removing any unnecessary fluff, wordiness, or empty filler while keeping it casual and human."
-  };
-
-  return `You are a human writer drafting a raw, unpolished post on Reddit or a personal blog. Rewrite the provided text as if you are typing it out quickly from memory, in a highly casual and human voice.
-
-CRITICAL - STYLE DIRECTIVES:
-Real human writing is naturally imperfect, irregular, and spontaneous. You must emulate this natural messiness:
-
-1. MESSY STRUCTURE:
-- Start sentences with conversational openers like "Like", "Honestly", "So", "I mean", "Basically", "Look".
-- Use em-dashes (—) and parentheses to interrupt yourself mid-thought.
-- Write sentence fragments and brief, punchy one-word assertions.
-- Go off on minor tangents to explain things in a relatable way.
-- Combine adjacent thoughts into slightly longer, run-on sentences.
-
-2. RAW VOCABULARY:
-- Completely avoid overly polished transitions and formal vocabulary. Never use: "furthermore", "moreover", "crucial", "pivotal", "delve", "facilitate", "utilize", "comprehensive", "robust", "streamline", "foster", "testament", "not only".
-- Instead use casual equivalents: "super", "really", "kind of", "pretty much", "a ton of", "huge".
-- Use contractions for absolutely everything: "you've", "they'd", "would've", "could've", "it'll".
-
-3. TONE & PERSONALITY:
-- Fluency: ${fluency} (${fluency === "Standard" ? "Casual, like explaining to a friend." : fluency === "Academic" ? "Smart but very informal, like a college student talking after class." : "Direct, no fluff, like a fast Slack message to a coworker."})
-- Tone: ${tone} (${tone === "Conversational" ? "Super laid back and chatty." : tone === "Confident" ? "Bold, opinionated, cutting to the chase." : tone === "Friendly" ? "Warm, approachable, maybe a bit enthusiastic." : tone === "Witty" ? "Sarcastic, sharp, slightly funny." : "Thoughtful, understanding, relatable."})
-
-4. LENGTH REQUIREMENT:
-- ${lengthDirectives[length]}
-
-Output ONLY the raw, messy, casual text. No preambles, introductions, or commentary.`;
-};
-
 const calculateMetrics = (text: string) => {
   if (!text.trim()) return { bypassRate: "0%", readability: "Awaiting input" };
   const sentences = text.split(/[.!?]+/).filter(s => s.trim().length > 0);
@@ -100,8 +65,6 @@ export default function App() {
   const currentOutput = mode === "Variations" && variations.length > 0 ? variations[activeVar] || "" : output;
   const outputMetrics = useMemo(() => calculateMetrics(currentOutput), [currentOutput]);
 
-  const prompt = buildSystemPrompt(fluency, tone, length);
-
   // ── SSE Stream Reader ──
   const readSSE = useCallback(async (response: Response, onChunk: (data: any) => void) => {
     const reader = response.body!.getReader();
@@ -130,7 +93,7 @@ export default function App() {
     const res = await fetch(`${API_BASE}/api/humanize`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: input, prompt }),
+      body: JSON.stringify({ text: input, fluency, tone, length }),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
@@ -139,7 +102,7 @@ export default function App() {
     const data = await res.json();
     if (!data.content) throw new Error("Empty response from the humanizer engine.");
     setOutput(data.content);
-  }, [input, prompt]);
+  }, [input, fluency, tone, length]);
 
   // ── Deep Mode (Single SSE endpoint, server-side multi-pass) ──
   const handleDeep = useCallback(async () => {
@@ -149,7 +112,7 @@ export default function App() {
     const res = await fetch(`${API_BASE}/api/humanize/deep`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: input, prompt }),
+      body: JSON.stringify({ text: input, fluency, tone, length }),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
@@ -174,7 +137,7 @@ export default function App() {
       setDeepProgress(null);
     }
     if (!finalText) throw new Error("Deep humanization produced no output.");
-  }, [input, prompt, readSSE]);
+  }, [input, fluency, tone, length, readSSE]);
 
   // ── Variations Mode ──
   const handleVariations = useCallback(async () => {
@@ -183,7 +146,7 @@ export default function App() {
     const res = await fetch(`${API_BASE}/api/humanize/variations`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: input, prompt }),
+      body: JSON.stringify({ text: input, fluency, tone, length }),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
@@ -192,7 +155,7 @@ export default function App() {
     const data = await res.json();
     if (!data.variations?.length) throw new Error("No variations returned.");
     setVariations(data.variations);
-  }, [input, prompt]);
+  }, [input, fluency, tone, length]);
 
   const handleHumanize = async () => {
     if (!input.trim() || isProcessing || isOverLimit) return;

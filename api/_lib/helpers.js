@@ -108,34 +108,114 @@ const DASH_INTERJECTIONS = [
   "— worth keeping in mind —",
 ];
 
+// ── Pre-compiled regex tables (built once at module load) ──
+const PRECOMPILED = (() => {
+  const phrases = [];
+  const words = [];
+  for (const [k, v] of Object.entries(SYNONYM_MAP)) {
+    if (k.includes(" ")) {
+      phrases.push([new RegExp(k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"), v]);
+    } else {
+      words.push([new RegExp(`\\b${k}\\b`, "gi"), v]);
+    }
+  }
+  return { phrases, words };
+})();
+
+// ── Seeded PRNG (mulberry32) — deterministic per-request ──
+export function mulberry32(seed) {
+  let s = seed >>> 0;
+  return function rng() {
+    s = (s + 0x6D2B79F5) >>> 0;
+    let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return (((t ^ (t >>> 14)) >>> 0) / 4294967296);
+  };
+}
+
+export function pickWith(rng, arr) {
+  return arr[Math.floor(rng() * arr.length)];
+}
+
+export function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+
+// ── CORS ──
 export function setCors(res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 }
 
-// Must match the MAX_CHARS constant in src/app/App.tsx.
-// The Vercel API build root cannot import from src/, so this is
+// ── Validation constants ──
+// Must match the constants in src/app/App.tsx.
+// The Vercel API build root cannot import from src/, so these are
 // duplicated by convention — keep them in sync.
 export const MAX_CHARS = 5000;
+export const FLUENCY_OPTIONS = ["Standard", "Academic", "Professional"];
+export const TONE_OPTIONS = ["Conversational", "Confident", "Friendly", "Witty", "Empathetic"];
+export const LENGTH_OPTIONS = ["Default", "Shorten", "Extend", "Concise"];
 
+// ── Server-side prompt builder ──
+const FLUENCY_LINES = {
+  Standard: "casual, like explaining something to a friend",
+  Academic: "smart but informal, like a college student talking after class",
+  Professional: "direct, no fluff, like a fast Slack message to a coworker",
+};
+
+const TONE_LINES = {
+  Conversational: "laid back and chatty",
+  Confident: "bold, opinionated, cuts to the chase",
+  Friendly: "warm, approachable, a little enthusiastic",
+  Witty: "sarcastic and sharp",
+  Empathetic: "thoughtful and relatable",
+};
+
+const LENGTH_LINES = {
+  Default: "Keep a similar length and detail level as the original.",
+  Shorten: "Make it noticeably shorter — cut filler, get to the point faster.",
+  Extend: "Make it longer — expand ideas, add natural tangents and extra context.",
+  Concise: "Make it highly concise and punchy — strip all unnecessary words while staying casual.",
+};
+
+export function buildSystemPrompt(fluency, tone, length) {
+  const f = FLUENCY_LINES[fluency] || FLUENCY_LINES.Standard;
+  const t = TONE_LINES[tone] || TONE_LINES.Conversational;
+  const l = LENGTH_LINES[length] || LENGTH_LINES.Default;
+  return `You're a real person writing fast. Write the way you'd actually talk — uneven, off-the-cuff, sometimes fragmentary.
+
+Voice: ${f}.
+Energy: ${t}.
+Length: ${l}
+
+Rewrite the user's text in that voice. Don't add or remove meaning. Output only the rewrite.`;
+}
+
+// ── Request validator ──
 export function validateHumanizeBody(body) {
   if (!body || typeof body !== "object") {
     return { ok: false, status: 400, message: "Request body must be a JSON object." };
   }
-  const { text, prompt } = body;
+  const { text, fluency, tone, length } = body;
   if (typeof text !== "string" || !text.trim()) {
     return { ok: false, status: 400, message: "'text' is required and must be a non-empty string." };
-  }
-  if (typeof prompt !== "string" || !prompt.trim()) {
-    return { ok: false, status: 400, message: "'prompt' is required and must be a non-empty string." };
   }
   if (text.length > MAX_CHARS) {
     return { ok: false, status: 413, message: `'text' exceeds ${MAX_CHARS} character limit.` };
   }
+  if (!FLUENCY_OPTIONS.includes(fluency)) {
+    return { ok: false, status: 400, message: `'fluency' must be one of: ${FLUENCY_OPTIONS.join(", ")}.` };
+  }
+  if (!TONE_OPTIONS.includes(tone)) {
+    return { ok: false, status: 400, message: `'tone' must be one of: ${TONE_OPTIONS.join(", ")}.` };
+  }
+  if (!LENGTH_OPTIONS.includes(length)) {
+    return { ok: false, status: 400, message: `'length' must be one of: ${LENGTH_OPTIONS.join(", ")}.` };
+  }
   return { ok: true };
 }
 
+// ── API guard wrapper ──
 export function withApiGuards(handler, { methods = ["POST"] } = {}) {
   return async function guardedHandler(req, res) {
     setCors(res);
@@ -154,92 +234,157 @@ export function withApiGuards(handler, { methods = ["POST"] } = {}) {
   };
 }
 
-export function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+// ── Burstiness pass ──
+// If sentence-length stdev is too low relative to the mean,
+// split the longest sentence at a conjunction to increase variance.
+function applyBurstinessPass(text) {
+  const sentences = text.match(/[^.!?]+[.!?]+/g);
+  if (!sentences || sentences.length < 3) return text;
 
-export function postProcess(text) {
+  const lengths = sentences.map(s => s.trim().split(/\s+/).filter(Boolean).length);
+  const mean = lengths.reduce((a, b) => a + b, 0) / lengths.length;
+  const variance = lengths.reduce((acc, l) => acc + (l - mean) ** 2, 0) / lengths.length;
+  const stdev = Math.sqrt(variance);
+
+  // Already bursty enough — leave it.
+  if (stdev >= 0.45 * mean) return text;
+
+  // Find longest sentence; try to split at a conjunction.
+  let longestIdx = 0;
+  for (let i = 1; i < lengths.length; i++) {
+    if (lengths[i] > lengths[longestIdx]) longestIdx = i;
+  }
+  if (lengths[longestIdx] < 14) return text;
+
+  const longest = sentences[longestIdx].trim();
+  const punc = longest.match(/[.!?]+$/)?.[0] || ".";
+  for (const sp of [" and ", " but ", " so ", " which ", " because "]) {
+    const idx = longest.indexOf(sp);
+    if (idx > 18 && idx < longest.length - 18) {
+      const first = longest.substring(0, idx).trim() + punc;
+      const rest = longest.substring(idx + sp.length).trim();
+      sentences[longestIdx] = first + " " + rest.charAt(0).toUpperCase() + rest.slice(1);
+      break;
+    }
+  }
+  return sentences.join(" ");
+}
+
+// ── Post-processing pipeline (seeded, pre-compiled) ──
+export function postProcess(text, seed = Math.floor(Math.random() * 0xFFFFFFFF)) {
+  const rng = mulberry32(seed);
   let result = text;
 
-  const phraseEntries = Object.entries(SYNONYM_MAP).filter(([k]) => k.includes(" "));
-  const wordEntries = Object.entries(SYNONYM_MAP).filter(([k]) => !k.includes(" "));
-
-  for (const [phrase, alts] of phraseEntries) {
-    const regex = new RegExp(phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
-    result = result.replace(regex, () => pick(alts));
+  // Step 1: phrase + word synonym replacement using pre-compiled regexes.
+  for (const [re, alts] of PRECOMPILED.phrases) {
+    result = result.replace(re, () => pickWith(rng, alts));
   }
-  for (const [word, alts] of wordEntries) {
-    const regex = new RegExp(`\\b${word}\\b`, "gi");
-    result = result.replace(regex, () => pick(alts));
+  for (const [re, alts] of PRECOMPILED.words) {
+    result = result.replace(re, () => pickWith(rng, alts));
   }
 
-  for (const [regex, replacement] of CONTRACTION_MAP) {
-    result = result.replace(regex, replacement);
+  // Step 2: force contractions.
+  for (const [re, replacement] of CONTRACTION_MAP) {
+    result = result.replace(re, replacement);
   }
 
-  const sentences = result.match(/[^.!?]+[.!?]+/g) || [result];
-  const processed = [];
+  // Step 3: sentence-level transformations.
+  // Opener freq cut from 22% to 10%, restricted to paragraph-initial sentences.
+  const paragraphs = result.split(/\n{2,}/);
+  const processedParas = paragraphs.map((para) => {
+    const sentences = para.match(/[^.!?]+[.!?]+/g) || [para];
+    const processed = [];
 
-  for (let i = 0; i < sentences.length; i++) {
-    let s = sentences[i].trim();
-    if (!s) continue;
+    for (let i = 0; i < sentences.length; i++) {
+      let s = sentences[i].trim();
+      if (!s) continue;
 
-    if (Math.random() < 0.22 && !s.match(/^(Look|Honestly|So|I mean|Basically|The thing|Actually|Truth|To be fair|What'?s|And)/i)) {
-      const opener = pick(HUMAN_OPENERS);
-      s = opener + s.charAt(0).toLowerCase() + s.slice(1);
-    }
+      const isParaInitial = i === 0;
 
-    if (Math.random() < 0.18 && s.includes(",")) {
-      const commaIdx = s.indexOf(",");
-      if (commaIdx > 8 && commaIdx < s.length - 12) {
-        s = s.substring(0, commaIdx) + pick(INFORMAL_INSERTS) + s.substring(commaIdx + 1);
+      // Opener: 10%, paragraph-initial only.
+      if (isParaInitial && rng() < 0.10 &&
+          !s.match(/^(Look|Honestly|So|I mean|Basically|The thing|Actually|Truth|To be fair|What'?s|And)/i)) {
+        const opener = pickWith(rng, HUMAN_OPENERS);
+        s = opener + s.charAt(0).toLowerCase() + s.slice(1);
       }
-    }
 
-    if (Math.random() < 0.14) {
-      const words = s.split(" ");
-      if (words.length > 7) {
-        words.splice(Math.floor(words.length * 0.45), 0, pick(DASH_INTERJECTIONS));
-        s = words.join(" ");
-      }
-    }
-
-    if (Math.random() < 0.15 && s.length > 75) {
-      for (const sp of [" and ", " but ", " so ", " which ", " because ", " while "]) {
-        const idx = s.indexOf(sp);
-        if (idx > 18 && idx < s.length - 18) {
-          const punc = s.match(/[.!?]+$/)?.[0] || ".";
-          s = s.substring(0, idx).trim() + punc + " " + s.substring(idx + sp.length).trim().replace(/^./, c => c.toUpperCase());
-          break;
+      // Mid-sentence informal insert at first comma. 18%.
+      if (rng() < 0.18 && s.includes(",")) {
+        const commaIdx = s.indexOf(",");
+        if (commaIdx > 8 && commaIdx < s.length - 12) {
+          s = s.substring(0, commaIdx) + pickWith(rng, INFORMAL_INSERTS) + s.substring(commaIdx + 1);
         }
       }
-    }
 
-    if (Math.random() < 0.10 && i < sentences.length - 1) {
-      const next = sentences[i + 1]?.trim();
-      if (next && next.length < 45 && s.length < 65) {
-        s = s.replace(/[.!?]+$/, "") + " — " + next.charAt(0).toLowerCase() + next.slice(1);
-        i++;
+      // Em-dash interjection. 14%.
+      if (rng() < 0.14) {
+        const words = s.split(" ");
+        if (words.length > 7) {
+          words.splice(Math.floor(words.length * 0.45), 0, pickWith(rng, DASH_INTERJECTIONS));
+          s = words.join(" ");
+        }
       }
+
+      // Sentence split on conjunction. 15%.
+      if (rng() < 0.15 && s.length > 75) {
+        for (const sp of [" and ", " but ", " so ", " which ", " because ", " while "]) {
+          const idx = s.indexOf(sp);
+          if (idx > 18 && idx < s.length - 18) {
+            const punc = s.match(/[.!?]+$/)?.[0] || ".";
+            s = s.substring(0, idx).trim() + punc + " " +
+                s.substring(idx + sp.length).trim().replace(/^./, c => c.toUpperCase());
+            break;
+          }
+        }
+      }
+
+      // Merge with next short sentence using em-dash. 10%.
+      if (rng() < 0.10 && i < sentences.length - 1) {
+        const next = sentences[i + 1]?.trim();
+        if (next && next.length < 45 && s.length < 65) {
+          s = s.replace(/[.!?]+$/, "") + " — " + next.charAt(0).toLowerCase() + next.slice(1);
+          i++;
+        }
+      }
+
+      processed.push(s);
     }
+    return processed.join(" ");
+  });
 
-    processed.push(s);
-  }
+  // Step 4: paragraph-level punch line frequency cut from 20% to 10%.
+  const withPunchLines = processedParas.map((para) => {
+    if (rng() < 0.10 && para.length > 100) {
+      const punchLines = [
+        "Here's why that matters.",
+        "And that's not all.",
+        "Think about it.",
+        "Sounds simple, right? It's not.",
+        "That changes everything.",
+      ];
+      return pickWith(rng, punchLines) + "\n\n" + para;
+    }
+    return para;
+  });
 
-  result = processed.join(" ");
+  result = withPunchLines.join("\n\n");
+
+  // Step 5: burstiness pass.
+  result = applyBurstinessPass(result);
+
+  // Step 6: cleanup.
   result = result.replace(/\s{2,}/g, " ").replace(/\s+([.,!?;:])/g, "$1").trim();
   return result;
 }
 
-export const REFINE_PROMPT = `You just received a draft that feels slightly too polished and stiff. Your job is to rough it up and make it sound like a real person wrote it fast and naturally.
+// ── Sharper REFINE_PROMPT (single high-commitment transform: opener variety) ──
+export const REFINE_PROMPT = `The draft below is decent but its sentence openers are too uniform — every sentence starts with a noun phrase or a transitional adverb. That's an AI tell.
 
-Specifically:
-1. Pick 2-3 sentences that feel too clean and rewrite them to be messier — add a dash, a fragment, a self-correction, or a quick aside.
-2. Find any sentence that starts with a capital word that sounds formal ("This system", "These tools", "Such methods") and rewrite the opener to be more casual.
-3. Find at least one place to add a rhetorical question ("Why does that matter?" / "Sound familiar?" / "And honestly, who wouldn't?").
-4. Make sure contractions are used wherever possible — no "do not", "it is", "they are" unless it's for emphasis.
-5. Don't change the meaning. Don't change more than 30% of the sentences.
+Rewrite only the sentence openers. Vary them aggressively: questions, fragments, mid-clause starts, conjunctions, interjections, single words. Keep the body of each sentence essentially unchanged. Don't touch more than 40% of sentences total.
 
-Output ONLY the refined text. No commentary.`;
+Don't change the meaning. Output only the revised text.`;
 
+// ── OpenAI-compatible API call ──
 export async function callOpenAI(prompt, text, temp = 0.9) {
   const API_KEY = process.env.FREEMODEL_API_KEY;
   const BASE_URL = process.env.OPENAI_BASE_URL || "https://api.freemodel.dev/v1";
