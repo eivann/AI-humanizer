@@ -108,6 +108,12 @@ const DASH_INTERJECTIONS = [
   "— worth keeping in mind —",
 ];
 
+export function setCors(res) {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+}
+
 // Must match the MAX_CHARS constant in src/app/App.tsx.
 // The Vercel API build root cannot import from src/, so this is
 // duplicated by convention — keep them in sync.
@@ -233,12 +239,6 @@ Specifically:
 5. Don't change the meaning. Don't change more than 30% of the sentences.
 
 Output ONLY the refined text. No commentary.`;
-
-export function setCors(res) {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-}
 
 export async function callOpenAI(prompt, text, temp = 0.9) {
   const API_KEY = process.env.FREEMODEL_API_KEY;

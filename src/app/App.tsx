@@ -1,18 +1,27 @@
-import { useMemo, useState, useCallback } from "react";
-import { Clipboard, Copy, Check, Sparkles, Wand2, Download, Zap, Layers, BarChart3 } from "lucide-react";
+import { useMemo, useState, useCallback, useRef, useEffect } from "react";
+import { Clipboard, Copy, Check, Sparkles, Wand2, Download, Zap, Layers, BarChart3, RefreshCw, Scissors, Plus, Puzzle, ChevronDown } from "lucide-react";
 import { toast, Toaster } from "sonner";
 
 const FLUENCY_OPTIONS = ["Standard", "Academic", "Professional"] as const;
 const TONE_OPTIONS = ["Conversational", "Confident", "Friendly", "Witty", "Empathetic"] as const;
 const MODE_OPTIONS = ["Standard", "Deep", "Variations"] as const;
+const LENGTH_OPTIONS = ["Default", "Shorten", "Extend", "Concise"] as const;
 
 type Fluency = (typeof FLUENCY_OPTIONS)[number];
 type Tone = (typeof TONE_OPTIONS)[number];
 type Mode = (typeof MODE_OPTIONS)[number];
+type Length = (typeof LENGTH_OPTIONS)[number];
 
 const MAX_CHARS = 5000;
 
-const buildSystemPrompt = (fluency: Fluency, tone: Tone) => {
+const buildSystemPrompt = (fluency: Fluency, tone: Tone, length: Length) => {
+  const lengthDirectives = {
+    Default: "Maintain a similar length and level of detail as the original text.",
+    Shorten: "Make the output significantly shorter, more compact, and condensed than the original text, getting straight to the point.",
+    Extend: "Make the output longer, more detailed, and elaborate than the original text, expanding on the ideas with natural explanations, conversational tangents, or extra context.",
+    Concise: "Make the output highly concise, punchy, and direct, removing any unnecessary fluff, wordiness, or empty filler while keeping it casual and human."
+  };
+
   return `You are a human writer drafting a raw, unpolished post on Reddit or a personal blog. Rewrite the provided text as if you are typing it out quickly from memory, in a highly casual and human voice.
 
 CRITICAL - STYLE DIRECTIVES:
@@ -33,6 +42,9 @@ Real human writing is naturally imperfect, irregular, and spontaneous. You must 
 3. TONE & PERSONALITY:
 - Fluency: ${fluency} (${fluency === "Standard" ? "Casual, like explaining to a friend." : fluency === "Academic" ? "Smart but very informal, like a college student talking after class." : "Direct, no fluff, like a fast Slack message to a coworker."})
 - Tone: ${tone} (${tone === "Conversational" ? "Super laid back and chatty." : tone === "Confident" ? "Bold, opinionated, cutting to the chase." : tone === "Friendly" ? "Warm, approachable, maybe a bit enthusiastic." : tone === "Witty" ? "Sarcastic, sharp, slightly funny." : "Thoughtful, understanding, relatable."})
+
+4. LENGTH REQUIREMENT:
+- ${lengthDirectives[length]}
 
 Output ONLY the raw, messy, casual text. No preambles, introductions, or commentary.`;
 };
@@ -78,6 +90,7 @@ export default function App() {
   const [fluency, setFluency] = useState<Fluency>("Standard");
   const [tone, setTone] = useState<Tone>("Conversational");
   const [mode, setMode] = useState<Mode>("Standard");
+  const [length, setLength] = useState<Length>("Default");
   const [deepProgress, setDeepProgress] = useState<{ pass: number; total: number; status: string } | null>(null);
 
   const charCount = input.length;
@@ -87,7 +100,7 @@ export default function App() {
   const currentOutput = mode === "Variations" && variations.length > 0 ? variations[activeVar] || "" : output;
   const outputMetrics = useMemo(() => calculateMetrics(currentOutput), [currentOutput]);
 
-  const prompt = buildSystemPrompt(fluency, tone);
+  const prompt = buildSystemPrompt(fluency, tone, length);
 
   // ── SSE Stream Reader ──
   const readSSE = useCallback(async (response: Response, onChunk: (data: any) => void) => {
@@ -104,7 +117,9 @@ export default function App() {
         if (!line.startsWith("data: ")) continue;
         const raw = line.slice(6).trim();
         if (raw === "[DONE]") continue;
-        try { onChunk(JSON.parse(raw)); } catch (_) {}
+        let parsed;
+        try { parsed = JSON.parse(raw); } catch (_) { continue; }
+        onChunk(parsed);
       }
     }
   }, []);
@@ -142,20 +157,22 @@ export default function App() {
     }
 
     let finalText = "";
-    await readSSE(res, (data) => {
-      if (data.type === "progress") {
-        setDeepProgress({ pass: data.pass, total: data.total, status: data.status });
-      } else if (data.type === "pass_result") {
-        setOutput(data.text);
-      } else if (data.type === "done") {
-        finalText = data.text;
-        setOutput(data.text);
-      } else if (data.type === "error") {
-        throw new Error(data.message);
-      }
-    });
-
-    setDeepProgress(null);
+    try {
+      await readSSE(res, (data) => {
+        if (data.type === "progress") {
+          setDeepProgress({ pass: data.pass, total: data.total, status: data.status });
+        } else if (data.type === "pass_result") {
+          setOutput(data.text);
+        } else if (data.type === "done") {
+          finalText = data.text;
+          setOutput(data.text);
+        } else if (data.type === "error") {
+          throw new Error(data.message);
+        }
+      });
+    } finally {
+      setDeepProgress(null);
+    }
     if (!finalText) throw new Error("Deep humanization produced no output.");
   }, [input, prompt, readSSE]);
 
@@ -310,6 +327,7 @@ export default function App() {
             <OptionGroup label="Mode" options={MODE_OPTIONS} value={mode} onChange={(v) => setMode(v as Mode)} icon={mode === "Deep" ? <Zap size={10} /> : mode === "Variations" ? <Layers size={10} /> : <Wand2 size={10} />} />
             <OptionGroup label="Fluency" options={FLUENCY_OPTIONS} value={fluency} onChange={(v) => setFluency(v as Fluency)} />
             <OptionGroup label="Tone" options={TONE_OPTIONS} value={tone} onChange={(v) => setTone(v as Tone)} />
+            <LengthDropdown value={length} onChange={setLength} />
 
             <button onClick={handleHumanize} disabled={!input.trim() || isProcessing || isOverLimit}
               className="group relative flex items-center gap-2 rounded-full px-7 py-3.5 text-white transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 cursor-pointer"
@@ -384,6 +402,7 @@ export default function App() {
           <StatBadge label="Bypass Rate" value={outputMetrics.bypassRate} tone="green" />
           <StatBadge label="Mode" value={mode} tone={mode === "Deep" ? "purple" : mode === "Variations" ? "blue" : "indigo"} />
           <StatBadge label="Tone" value={tone} tone="purple" />
+          <StatBadge label="Length" value={length} tone="indigo" />
           <StatBadge label="Readability" value={outputMetrics.readability} tone="blue" />
         </footer>
       </div>
@@ -453,6 +472,113 @@ function OptionGroup({ label, options, value, onChange, icon }: { label: string;
           );
         })}
       </div>
+    </div>
+  );
+}
+
+const LENGTH_DETAILS = {
+  Default: {
+    label: "Default",
+    icon: RefreshCw,
+    iconColor: "#3B82F6",
+    iconBg: "#EFF6FF",
+  },
+  Shorten: {
+    label: "Shorten",
+    icon: Scissors,
+    iconColor: "#EC4899",
+    iconBg: "#FDF2F8",
+  },
+  Extend: {
+    label: "Extend",
+    icon: Plus,
+    iconColor: "#4F46E5",
+    iconBg: "#EEF2FF",
+  },
+  Concise: {
+    label: "Concise",
+    icon: Puzzle,
+    iconColor: "#10B981",
+    iconBg: "#ECFDF5",
+  },
+};
+
+function LengthDropdown({ value, onChange }: { value: Length; onChange: (v: Length) => void }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const selected = LENGTH_DETAILS[value];
+  const SelectedIcon = selected.icon;
+
+  return (
+    <div ref={containerRef} className="flex w-full max-w-[240px] items-center justify-between gap-3 relative">
+      <span style={{ color: "#94A3B8", fontSize: "10px", fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase" }}>
+        Length
+      </span>
+      
+      <button 
+        onClick={() => setIsOpen(!isOpen)}
+        className="flex items-center gap-2 px-3 py-1.5 rounded-lg border transition hover:bg-slate-50 cursor-pointer text-slate-800 bg-white"
+        style={{ borderColor: "#E2E8F0", fontSize: "11px", fontWeight: 600, boxShadow: "0 1px 2px rgba(15,23,42,0.04)" }}
+      >
+        <span className="flex h-4 w-4 items-center justify-center rounded" style={{ color: selected.iconColor }}>
+          <SelectedIcon size={12} strokeWidth={2.5} />
+        </span>
+        <span>{selected.label}</span>
+        <ChevronDown size={11} className={`text-slate-400 transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`} />
+      </button>
+
+      {isOpen && (
+        <div 
+          className="absolute right-0 top-full mt-1.5 z-50 w-[140px] rounded-lg border bg-white py-1 shadow-lg" 
+          style={{ borderColor: "#E2E8F0" }}
+        >
+          {LENGTH_OPTIONS.map((opt) => {
+            const isCurrent = opt === value;
+            const details = LENGTH_DETAILS[opt];
+            const OptIcon = details.icon;
+            
+            return (
+              <button
+                key={opt}
+                onClick={() => {
+                  onChange(opt);
+                  setIsOpen(false);
+                }}
+                className={`flex w-full items-center gap-2.5 px-3 py-2 text-left transition cursor-pointer ${
+                  isCurrent 
+                    ? "bg-[#2563EB] text-white" 
+                    : "text-slate-700 hover:bg-slate-50 hover:text-slate-900"
+                }`}
+                style={{
+                  fontSize: "11px",
+                  fontWeight: 600,
+                }}
+              >
+                <span 
+                  className="flex h-4 w-4 items-center justify-center rounded" 
+                  style={{ 
+                    color: isCurrent ? "#FFF" : details.iconColor 
+                  }}
+                >
+                  <OptIcon size={12} strokeWidth={2.5} />
+                </span>
+                <span className="flex-1">{details.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
