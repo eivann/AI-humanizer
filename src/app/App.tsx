@@ -1,5 +1,5 @@
-import { useMemo, useState, useCallback, useRef, useEffect } from "react";
-import { Clipboard, Copy, Check, Sparkles, Wand2, Download, Zap, Layers, BarChart3, RefreshCw, Scissors, Plus, Puzzle, ChevronDown } from "lucide-react";
+import { useMemo, useState, useCallback } from "react";
+import { Clipboard, Copy, Check, Sparkles, Wand2, Download, Zap, Layers, BarChart3 } from "lucide-react";
 import { toast, Toaster } from "sonner";
 
 const FLUENCY_OPTIONS = ["Standard", "Academic", "Professional"] as const;
@@ -327,7 +327,7 @@ export default function App() {
             <OptionGroup label="Mode" options={MODE_OPTIONS} value={mode} onChange={(v) => setMode(v as Mode)} icon={mode === "Deep" ? <Zap size={10} /> : mode === "Variations" ? <Layers size={10} /> : <Wand2 size={10} />} />
             <OptionGroup label="Fluency" options={FLUENCY_OPTIONS} value={fluency} onChange={(v) => setFluency(v as Fluency)} />
             <OptionGroup label="Tone" options={TONE_OPTIONS} value={tone} onChange={(v) => setTone(v as Tone)} />
-            <LengthDropdown value={length} onChange={setLength} />
+            <OptionGroup label="Length" options={LENGTH_OPTIONS} value={length} onChange={(v) => setLength(v as Length)} />
 
             <button onClick={handleHumanize} disabled={!input.trim() || isProcessing || isOverLimit}
               className="group relative flex items-center gap-2 rounded-full px-7 py-3.5 text-white transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 cursor-pointer"
@@ -476,112 +476,6 @@ function OptionGroup({ label, options, value, onChange, icon }: { label: string;
   );
 }
 
-const LENGTH_DETAILS = {
-  Default: {
-    label: "Default",
-    icon: RefreshCw,
-    iconColor: "#3B82F6",
-    iconBg: "#EFF6FF",
-  },
-  Shorten: {
-    label: "Shorten",
-    icon: Scissors,
-    iconColor: "#EC4899",
-    iconBg: "#FDF2F8",
-  },
-  Extend: {
-    label: "Extend",
-    icon: Plus,
-    iconColor: "#4F46E5",
-    iconBg: "#EEF2FF",
-  },
-  Concise: {
-    label: "Concise",
-    icon: Puzzle,
-    iconColor: "#10B981",
-    iconBg: "#ECFDF5",
-  },
-};
-
-function LengthDropdown({ value, onChange }: { value: Length; onChange: (v: Length) => void }) {
-  const [isOpen, setIsOpen] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
-        setIsOpen(false);
-      }
-    }
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
-  const selected = LENGTH_DETAILS[value];
-  const SelectedIcon = selected.icon;
-
-  return (
-    <div ref={containerRef} className="flex w-full max-w-[240px] items-center justify-between gap-3 relative">
-      <span style={{ color: "#94A3B8", fontSize: "10px", fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase" }}>
-        Length
-      </span>
-      
-      <button 
-        onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-2 px-3 py-1.5 rounded-lg border transition hover:bg-slate-50 cursor-pointer text-slate-800 bg-white"
-        style={{ borderColor: "#E2E8F0", fontSize: "11px", fontWeight: 600, boxShadow: "0 1px 2px rgba(15,23,42,0.04)" }}
-      >
-        <span className="flex h-4 w-4 items-center justify-center rounded" style={{ color: selected.iconColor }}>
-          <SelectedIcon size={12} strokeWidth={2.5} />
-        </span>
-        <span>{selected.label}</span>
-        <ChevronDown size={11} className={`text-slate-400 transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`} />
-      </button>
-
-      {isOpen && (
-        <div 
-          className="absolute right-0 top-full mt-1.5 z-50 w-[140px] rounded-lg border bg-white py-1 shadow-lg" 
-          style={{ borderColor: "#E2E8F0" }}
-        >
-          {LENGTH_OPTIONS.map((opt) => {
-            const isCurrent = opt === value;
-            const details = LENGTH_DETAILS[opt];
-            const OptIcon = details.icon;
-            
-            return (
-              <button
-                key={opt}
-                onClick={() => {
-                  onChange(opt);
-                  setIsOpen(false);
-                }}
-                className={`flex w-full items-center gap-2.5 px-3 py-2 text-left transition cursor-pointer ${
-                  isCurrent 
-                    ? "bg-[#2563EB] text-white" 
-                    : "text-slate-700 hover:bg-slate-50 hover:text-slate-900"
-                }`}
-                style={{
-                  fontSize: "11px",
-                  fontWeight: 600,
-                }}
-              >
-                <span 
-                  className="flex h-4 w-4 items-center justify-center rounded" 
-                  style={{ 
-                    color: isCurrent ? "#FFF" : details.iconColor 
-                  }}
-                >
-                  <OptIcon size={12} strokeWidth={2.5} />
-                </span>
-                <span className="flex-1">{details.label}</span>
-              </button>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
 
 function ShimmerLines() {
   return (
