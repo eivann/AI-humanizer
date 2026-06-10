@@ -1,5 +1,5 @@
 import { useMemo, useState, useCallback } from "react";
-import { Clipboard, Copy, Check, Sparkles, Wand2, Download, Zap, Layers, BarChart3 } from "lucide-react";
+import { Clipboard, Copy, Check, Sparkles, Wand2, Download, Zap, Layers, BarChart3, Cat } from "lucide-react";
 import { toast, Toaster } from "sonner";
 
 const FLUENCY_OPTIONS = ["Standard", "Academic", "Professional"] as const;
@@ -361,12 +361,23 @@ export default function App() {
         </section>
 
         {/* Metric Badges */}
-        <footer className="mt-8 flex flex-wrap items-center justify-center gap-3">
-          <StatBadge label="Bypass Rate" value={outputMetrics.bypassRate} tone="green" />
-          <StatBadge label="Mode" value={mode} tone={mode === "Deep" ? "purple" : mode === "Variations" ? "blue" : "indigo"} />
-          <StatBadge label="Tone" value={tone} tone="purple" />
-          <StatBadge label="Length" value={length} tone="indigo" />
-          <StatBadge label="Readability" value={outputMetrics.readability} tone="blue" />
+        <footer className="mt-8 flex flex-col items-center gap-5">
+          <div className="flex flex-wrap items-center justify-center gap-3">
+            <StatBadge label="Bypass Rate" value={outputMetrics.bypassRate} tone="green" />
+            <StatBadge label="Mode" value={mode} tone={mode === "Deep" ? "purple" : mode === "Variations" ? "blue" : "indigo"} />
+            <StatBadge label="Tone" value={tone} tone="purple" />
+            <StatBadge label="Length" value={length} tone="indigo" />
+            <StatBadge label="Readability" value={outputMetrics.readability} tone="blue" />
+          </div>
+          
+          <div className="flex items-center gap-1.5" style={{ fontSize: "13px", fontWeight: 500, color: "#64748B", marginTop: "4px" }}>
+            made by
+            <a href="https://phcorner.org/members/2552607/" target="_blank" rel="noopener noreferrer" 
+               className="group flex items-center gap-1.5 transition-colors hover:text-indigo-600" 
+               style={{ color: "#475569", fontWeight: 600 }}>
+              Pomiboags <Cat size={14} className="transition-transform group-hover:scale-110" />
+            </a>
+          </div>
         </footer>
       </div>
     </div>
