@@ -87,26 +87,7 @@ const CONTRACTION_MAP = [
   [/\blet us\b/gi, "let's"],
 ];
 
-const INFORMAL_INSERTS = [
-  ", honestly,", ", really,", ", basically,", " — and that's kind of the point —",
-  ", to be fair,", ", which is pretty interesting,", ", if you think about it,",
-  ", which matters more than people realize,", ", and I think that's the key part,",
-];
 
-const HUMAN_OPENERS = [
-  "Look, ", "Honestly, ", "Here's the thing — ", "So basically, ",
-  "The thing is, ", "I mean, ", "And honestly, ", "Truth is, ",
-  "To be fair, ", "What's interesting is ", "The real story here is ",
-];
-
-const DASH_INTERJECTIONS = [
-  "— and this is important —",
-  "— which is actually pretty wild —",
-  "— at least in most cases —",
-  "— not that it's obvious —",
-  "— though it depends —",
-  "— worth keeping in mind —",
-];
 
 // ── Pre-compiled regex tables (built once at module load) ──
 const PRECOMPILED = (() => {
@@ -193,13 +174,22 @@ export function buildSystemPrompt(fluency, tone, length) {
   const f = FLUENCY_LINES[fluency] || FLUENCY_LINES.Standard;
   const t = TONE_LINES[tone] || TONE_LINES.Conversational;
   const l = LENGTH_LINES[length] || LENGTH_LINES.Default;
-  return `You're a real person writing fast. Write the way you'd actually talk — uneven, off-the-cuff, sometimes fragmentary.
+  return `You are a human writer aiming for high burstiness and high perplexity to bypass AI detection.
+Write completely naturally, avoiding all typical AI patterns.
 
 Voice: ${f}.
 Energy: ${t}.
 Length: ${l}
 
-Rewrite the user's text in that voice. Don't add or remove meaning. Output only the rewrite.`;
+CRITICAL RULES:
+1. BURSTINESS: Mix extremely short sentences (1-3 words) with long, winding, complex sentences. Never use uniform sentence lengths.
+2. PERPLEXITY: Use slightly unconventional, creative phrasing rather than predictable word choices.
+3. NEVER use standard AI transitions (e.g., "Moreover", "Furthermore", "In conclusion", "Ultimately", "Importantly").
+4. NEVER use "human-mimicking" cliches (e.g., "Honestly,", "Look,", "Here's the thing,", "At the end of the day").
+5. Do not summarize at the end. End abruptly if natural.
+6. Use active voice and strong, vivid verbs.
+
+Rewrite the user's text following these rules exactly. Don't add or remove core meaning. Output ONLY the rewritten text, with no preamble.`;
 }
 
 // ── Request validator ──
@@ -299,8 +289,7 @@ export function postProcess(text, seed = Math.floor(Math.random() * 0xFFFFFFFF))
     result = result.replace(re, replacement);
   }
 
-  // Step 3: sentence-level transformations.
-  // Opener freq cut from 22% to 10%, restricted to paragraph-initial sentences.
+  // Step 3: sentence-level transformations for burstiness.
   const paragraphs = result.split(/\n{2,}/);
   const processedParas = paragraphs.map((para) => {
     const sentences = para.match(/[^.!?]+[.!?]+/g) || [para];
@@ -309,32 +298,6 @@ export function postProcess(text, seed = Math.floor(Math.random() * 0xFFFFFFFF))
     for (let i = 0; i < sentences.length; i++) {
       let s = sentences[i].trim();
       if (!s) continue;
-
-      const isParaInitial = i === 0;
-
-      // Opener: 10%, paragraph-initial only.
-      if (isParaInitial && rng() < 0.10 &&
-          !s.match(/^(Look|Honestly|So|I mean|Basically|The thing|Actually|Truth|To be fair|What'?s|And)/i)) {
-        const opener = pickWith(rng, HUMAN_OPENERS);
-        s = opener + s.charAt(0).toLowerCase() + s.slice(1);
-      }
-
-      // Mid-sentence informal insert at first comma. 18%.
-      if (rng() < 0.18 && s.includes(",")) {
-        const commaIdx = s.indexOf(",");
-        if (commaIdx > 8 && commaIdx < s.length - 12) {
-          s = s.substring(0, commaIdx) + pickWith(rng, INFORMAL_INSERTS) + s.substring(commaIdx + 1);
-        }
-      }
-
-      // Em-dash interjection. 14%.
-      if (rng() < 0.14) {
-        const words = s.split(" ");
-        if (words.length > 7) {
-          words.splice(Math.floor(words.length * 0.45), 0, pickWith(rng, DASH_INTERJECTIONS));
-          s = words.join(" ");
-        }
-      }
 
       // Sentence split on conjunction. 15%.
       if (rng() < 0.15 && s.length > 75) {
@@ -363,22 +326,7 @@ export function postProcess(text, seed = Math.floor(Math.random() * 0xFFFFFFFF))
     return processed.join(" ");
   });
 
-  // Step 4: paragraph-level punch line frequency cut from 20% to 10%.
-  const withPunchLines = processedParas.map((para) => {
-    if (rng() < 0.10 && para.length > 100) {
-      const punchLines = [
-        "Here's why that matters.",
-        "And that's not all.",
-        "Think about it.",
-        "Sounds simple, right? It's not.",
-        "That changes everything.",
-      ];
-      return pickWith(rng, punchLines) + "\n\n" + para;
-    }
-    return para;
-  });
-
-  result = withPunchLines.join("\n\n");
+  result = processedParas.join("\n\n");
 
   // Step 5: burstiness pass.
   result = applyBurstinessPass(result);
@@ -389,14 +337,17 @@ export function postProcess(text, seed = Math.floor(Math.random() * 0xFFFFFFFF))
 }
 
 // ── Sharper REFINE_PROMPT (single high-commitment transform: opener variety) ──
-export const REFINE_PROMPT = `The draft below is decent but its sentence openers are too uniform — every sentence starts with a noun phrase or a transitional adverb. That's an AI tell.
+export const REFINE_PROMPT = `The draft below reads too much like typical AI generation. It lacks burstiness and perplexity.
 
-Rewrite only the sentence openers. Vary them aggressively: questions, fragments, mid-clause starts, conjunctions, interjections, single words. Keep the body of each sentence essentially unchanged. Don't touch more than 40% of sentences total.
+Rewrite it to completely evade AI detectors.
+1. Vary sentence lengths drastically (mix 2-word sentences with 30-word ones).
+2. Swap predictable adjectives/verbs for less common, highly specific ones (high perplexity).
+3. Remove any remaining AI-style transitions, cliches, or summaries.
 
-Don't change the meaning. Output only the revised text.`;
+Do not change the underlying meaning. Output only the revised text.`;
 
 // ── OpenAI-compatible API call ──
-export async function callOpenAI(prompt, text, temp = 0.9) {
+export async function callOpenAI(prompt, text, temp = 0.95) {
   const API_KEY = process.env.FREEMODEL_API_KEY;
   const BASE_URL = process.env.OPENAI_BASE_URL || "https://api.freemodel.dev/v1";
   const MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
