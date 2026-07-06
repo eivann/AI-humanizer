@@ -11,11 +11,9 @@ async function variations(req, res) {
   const seeds = [seedBase, (seedBase ^ 0xA5A5A5A5) >>> 0, (seedBase ^ 0x5A5A5A5A) >>> 0];
 
   try {
-    const [r1, r2, r3] = await Promise.all([
-      callOpenAI(prompt, text, 0.8, model),
-      callOpenAI(prompt, text, 0.95, model),
-      callOpenAI(prompt, text, 1.1, model),
-    ]);
+    const r1 = await callOpenAI(prompt, text, 0.8, model);
+    const r2 = await callOpenAI(prompt, text, 0.95, model);
+    const r3 = await callOpenAI(prompt, text, 1.1, model);
     return res.status(200).json({
       variations: [
         postProcess(r1, seeds[0]),
