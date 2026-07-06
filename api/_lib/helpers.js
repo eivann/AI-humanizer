@@ -220,6 +220,8 @@ export function validateHumanizeBody(body) {
 }
 
 // ── API guard wrapper ──
+const rateLimitMap = new Map();
+
 export function withApiGuards(handler, { methods = ["POST"] } = {}) {
   return async function guardedHandler(req, res) {
     setCors(req, res);
@@ -227,6 +229,33 @@ export function withApiGuards(handler, { methods = ["POST"] } = {}) {
     if (!methods.includes(req.method)) {
       return res.status(405).json({ error: { message: "Method not allowed" } });
     }
+
+    // 1. Anti-bot custom header
+    if (req.headers["x-lumen-client"] !== "v1") {
+      return res.status(403).json({ error: { message: "Forbidden: Invalid client signature." } });
+    }
+
+    // 2. Simple IP-based rate limiting (1 request per 8 seconds per IP)
+    const ip = req.headers["x-forwarded-for"] || req.connection?.remoteAddress || "unknown";
+    const now = Date.now();
+    const windowMs = 8000;
+    
+    if (ip !== "unknown") {
+      const lastReq = rateLimitMap.get(ip);
+      if (lastReq && now - lastReq < windowMs) {
+        return res.status(429).json({ error: { message: "Too many requests. Please wait a few seconds before humanizing again." } });
+      }
+      rateLimitMap.set(ip, now);
+      
+      // Cleanup to prevent memory leaks in warm lambdas
+      if (rateLimitMap.size > 500) {
+        const expired = now - windowMs;
+        for (const [key, val] of rateLimitMap.entries()) {
+          if (val < expired) rateLimitMap.delete(key);
+        }
+      }
+    }
+
     if (!process.env.FREEMODEL_API_KEY) {
       return res.status(500).json({ error: { message: "API key not configured." } });
     }

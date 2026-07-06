@@ -95,7 +95,7 @@ export default function App() {
     setOutput("");
     const res = await fetch(`${API_BASE}/api/humanize`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "x-lumen-client": "v1" },
       body: JSON.stringify({ text: input, fluency, tone, length, model: selectedModel }),
     });
     if (!res.ok) {
@@ -114,7 +114,7 @@ export default function App() {
 
     const res = await fetch(`${API_BASE}/api/humanize/deep`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "x-lumen-client": "v1" },
       body: JSON.stringify({ text: input, fluency, tone, length, model: selectedModel }),
     });
     if (!res.ok) {
@@ -148,7 +148,7 @@ export default function App() {
     setActiveVar(0);
     const res = await fetch(`${API_BASE}/api/humanize/variations`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "x-lumen-client": "v1" },
       body: JSON.stringify({ text: input, fluency, tone, length, model: selectedModel }),
     });
     if (!res.ok) {
