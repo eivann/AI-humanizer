@@ -197,9 +197,12 @@ export function validateHumanizeBody(body) {
   if (!body || typeof body !== "object") {
     return { ok: false, status: 400, message: "Request body must be a JSON object." };
   }
-  const { text, fluency, tone, length } = body;
+  const { text, fluency, tone, length, model } = body;
   if (typeof text !== "string" || !text.trim()) {
     return { ok: false, status: 400, message: "'text' is required and must be a non-empty string." };
+  }
+  if (model && typeof model !== "string") {
+    return { ok: false, status: 400, message: "'model' must be a string." };
   }
   if (text.length > MAX_CHARS) {
     return { ok: false, status: 413, message: `'text' exceeds ${MAX_CHARS} character limit.` };
@@ -347,10 +350,10 @@ Rewrite it to completely evade AI detectors.
 Do not change the underlying meaning. Output only the revised text.`;
 
 // ── OpenAI-compatible API call ──
-export async function callOpenAI(prompt, text, temp = 0.95) {
+export async function callOpenAI(prompt, text, temp = 0.95, overrideModel = null) {
   const API_KEY = process.env.FREEMODEL_API_KEY;
   const BASE_URL = process.env.OPENAI_BASE_URL || "https://api.freemodel.dev/v1";
-  const MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
+  const MODEL = overrideModel || process.env.OPENAI_MODEL || "gpt-4o-mini";
   const url = `${BASE_URL.replace(/\/+$/, "")}/chat/completions`;
   
   const controller = new AbortController();

@@ -3,7 +3,7 @@ import { withApiGuards, callOpenAI, postProcess, buildSystemPrompt } from "../_l
 export const config = { maxDuration: 60 };
 
 async function variations(req, res) {
-  const { text, fluency, tone, length } = req.body;
+  const { text, fluency, tone, length, model } = req.body;
   const prompt = buildSystemPrompt(fluency, tone, length);
   // Three independent seeds — each variation is internally coherent
   // but the three variations differ from each other.
@@ -12,9 +12,9 @@ async function variations(req, res) {
 
   try {
     const [r1, r2, r3] = await Promise.all([
-      callOpenAI(prompt, text, 0.8),
-      callOpenAI(prompt, text, 0.95),
-      callOpenAI(prompt, text, 1.1),
+      callOpenAI(prompt, text, 0.8, model),
+      callOpenAI(prompt, text, 0.95, model),
+      callOpenAI(prompt, text, 1.1, model),
     ]);
     return res.status(200).json({
       variations: [

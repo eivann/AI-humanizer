@@ -6,11 +6,13 @@ const FLUENCY_OPTIONS = ["Standard", "Academic", "Professional"] as const;
 const TONE_OPTIONS = ["Conversational", "Confident", "Friendly", "Witty", "Empathetic"] as const;
 const MODE_OPTIONS = ["Standard", "Deep", "Variations"] as const;
 const LENGTH_OPTIONS = ["Default", "Shorten", "Extend", "Concise"] as const;
+const MODEL_OPTIONS = ["grok-4.3", "grok-4.20-0309-reasoning", "grok-4.20-multi-agent-0309"] as const;
 
 type Fluency = (typeof FLUENCY_OPTIONS)[number];
 type Tone = (typeof TONE_OPTIONS)[number];
 type Mode = (typeof MODE_OPTIONS)[number];
 type Length = (typeof LENGTH_OPTIONS)[number];
+type ModelType = (typeof MODEL_OPTIONS)[number];
 
 const MAX_CHARS = 5000;
 
@@ -56,6 +58,7 @@ export default function App() {
   const [tone, setTone] = useState<Tone>("Conversational");
   const [mode, setMode] = useState<Mode>("Standard");
   const [length, setLength] = useState<Length>("Default");
+  const [selectedModel, setSelectedModel] = useState<ModelType>("grok-4.3");
   const [deepProgress, setDeepProgress] = useState<{ pass: number; total: number; status: string } | null>(null);
 
   const charCount = input.length;
@@ -93,7 +96,7 @@ export default function App() {
     const res = await fetch(`${API_BASE}/api/humanize`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: input, fluency, tone, length }),
+      body: JSON.stringify({ text: input, fluency, tone, length, model: selectedModel }),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
@@ -102,7 +105,7 @@ export default function App() {
     const data = await res.json();
     if (!data.content) throw new Error("Empty response from the humanizer engine.");
     setOutput(data.content);
-  }, [input, fluency, tone, length]);
+  }, [input, fluency, tone, length, selectedModel]);
 
   // ── Deep Mode (Single SSE endpoint, server-side multi-pass) ──
   const handleDeep = useCallback(async () => {
@@ -112,7 +115,7 @@ export default function App() {
     const res = await fetch(`${API_BASE}/api/humanize/deep`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: input, fluency, tone, length }),
+      body: JSON.stringify({ text: input, fluency, tone, length, model: selectedModel }),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
@@ -137,7 +140,7 @@ export default function App() {
       setDeepProgress(null);
     }
     if (!finalText) throw new Error("Deep humanization produced no output.");
-  }, [input, fluency, tone, length, readSSE]);
+  }, [input, fluency, tone, length, selectedModel, readSSE]);
 
   // ── Variations Mode ──
   const handleVariations = useCallback(async () => {
@@ -146,7 +149,7 @@ export default function App() {
     const res = await fetch(`${API_BASE}/api/humanize/variations`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: input, fluency, tone, length }),
+      body: JSON.stringify({ text: input, fluency, tone, length, model: selectedModel }),
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
@@ -155,7 +158,7 @@ export default function App() {
     const data = await res.json();
     if (!data.variations?.length) throw new Error("No variations returned.");
     setVariations(data.variations);
-  }, [input, fluency, tone, length]);
+  }, [input, fluency, tone, length, selectedModel]);
 
   const handleHumanize = async () => {
     if (!input.trim() || isProcessing || isOverLimit) return;
@@ -288,6 +291,7 @@ export default function App() {
           {/* Config Column */}
           <div className="flex flex-col items-center justify-center gap-4 px-2">
             <OptionGroup label="Mode" options={MODE_OPTIONS} value={mode} onChange={(v) => setMode(v as Mode)} icon={mode === "Deep" ? <Zap size={10} /> : mode === "Variations" ? <Layers size={10} /> : <Wand2 size={10} />} />
+            <OptionGroup label="Model" options={MODEL_OPTIONS} value={selectedModel} onChange={(v) => setSelectedModel(v as ModelType)} />
             <OptionGroup label="Fluency" options={FLUENCY_OPTIONS} value={fluency} onChange={(v) => setFluency(v as Fluency)} />
             <OptionGroup label="Tone" options={TONE_OPTIONS} value={tone} onChange={(v) => setTone(v as Tone)} />
             <OptionGroup label="Length" options={LENGTH_OPTIONS} value={length} onChange={(v) => setLength(v as Length)} />

@@ -3,7 +3,7 @@ import { withApiGuards, callOpenAI, postProcess, buildSystemPrompt, REFINE_PROMP
 export const config = { maxDuration: 60 };
 
 async function deep(req, res) {
-  const { text, fluency, tone, length } = req.body;
+  const { text, fluency, tone, length, model } = req.body;
   const prompt = buildSystemPrompt(fluency, tone, length);
   const seed = Math.floor(Math.random() * 0xFFFFFFFF);
 
@@ -15,11 +15,11 @@ async function deep(req, res) {
 
   try {
     send({ type: "progress", pass: 1, total: 3, status: "Humanizing original text..." });
-    const pass1 = await callOpenAI(prompt, text);
+    const pass1 = await callOpenAI(prompt, text, 0.95, model);
     send({ type: "pass_result", pass: 1, text: postProcess(pass1, seed) });
 
     send({ type: "progress", pass: 2, total: 3, status: "AI deep refinement pass..." });
-    const pass2 = await callOpenAI(REFINE_PROMPT, pass1);
+    const pass2 = await callOpenAI(REFINE_PROMPT, pass1, 0.95, model);
     send({ type: "pass_result", pass: 2, text: postProcess(pass2, seed) });
 
     send({ type: "progress", pass: 3, total: 3, status: "Statistical token transformation..." });

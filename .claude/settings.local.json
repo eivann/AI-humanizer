@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git checkout *)",
+      "Bash(node -e \"JSON.parse\\(require\\('fs'\\).readFileSync\\('package.json','utf8'\\)\\); console.log\\('valid'\\)\")",
+      "Bash(pnpm build *)",
+      "Bash(pnpm install *)",
+      "Bash(xargs grep -l \"lumen-ai-humanizer\\\\|figma/my-make-file\")",
+      "Bash(python3 -c ' *)",
+      "Bash(node --check \"/d/AI Humanizer Web App/api/humanize/index.js\")",
+      "Bash(node --check \"/d/AI Humanizer Web App/api/humanize/deep.js\")",
+      "Bash(node --check \"/d/AI Humanizer Web App/api/humanize/variations.js\")",
+      "Bash(node --check api/_lib/helpers.js)"
+    ]
+  }
+}
