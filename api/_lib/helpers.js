@@ -367,8 +367,6 @@ export async function callOpenAI(prompt, text, temp = 0.95) {
         model: MODEL,
         messages: [{ role: "system", content: prompt }, { role: "user", content: guardedText }],
         temperature: temp,
-        frequency_penalty: 0.9,
-        presence_penalty: 0.8,
       }),
     });
     
